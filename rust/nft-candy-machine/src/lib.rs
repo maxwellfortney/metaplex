@@ -16,7 +16,6 @@ use {
     spl_token::state::{Account, Mint},
     std::cell::Ref,
 };
-anchor_lang::declare_id!("cndyAnrLdpjq1Ssp1z8xxDsB8dxe7u4HL5Nxi2K5WXZ");
 
 const PREFIX: &str = "candy_machine";
 #[program]
@@ -41,8 +40,33 @@ pub mod nft_candy_machine {
             }
             Some(val) => {
                 if clock.unix_timestamp < val {
-                    if *ctx.accounts.payer.key != candy_machine.authority {
-                        return Err(ErrorCode::CandyMachineNotLiveYet.into());
+                    match candy_machine.data.whitelist_go_live_date {
+                        None => {
+                            if *ctx.accounts.payer.key != candy_machine.authority {
+                                return Err(ErrorCode::CandyMachineNotLiveYet.into());
+                            }
+                        }
+                        Some(val) => {
+                            if clock.unix_timestamp < val {
+                                if *ctx.accounts.payer.key != candy_machine.authority {
+                                    return Err(ErrorCode::CandyMachineWhitelistNotLiveYet.into());
+                                }
+                            } else {
+                                if *ctx.accounts.payer.key != candy_machine.authority {
+                                    return Err(ErrorCode::CandyMachineWhitelistNotLiveYet.into());
+                                }
+                                // Find if user is whitelisted
+                                if candy_machine
+                                    .data
+                                    .whitelisted_users
+                                    .contains(&ctx.accounts.payer.key)
+                                {
+                                    println!("{} in whitelist", *ctx.accounts.payer.key);
+                                } else {
+                                    return Err(ErrorCode::PayerNotWhiteListed.into());
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -217,6 +241,7 @@ pub mod nft_candy_machine {
         ctx: Context<UpdateCandyMachine>,
         price: Option<u64>,
         go_live_date: Option<i64>,
+        whitelist_go_live_date: Option<i64>,
     ) -> ProgramResult {
         let candy_machine = &mut ctx.accounts.candy_machine;
 
@@ -227,6 +252,11 @@ pub mod nft_candy_machine {
         if let Some(go_l) = go_live_date {
             msg!("Go live date changed to {}", go_l);
             candy_machine.data.go_live_date = Some(go_l)
+        }
+
+        if let Some(wl_go_l) = whitelist_go_live_date {
+            msg!("Whitelist go live date changed to {}", wl_go_l);
+            candy_machine.data.whitelist_go_live_date = Some(wl_go_l)
         }
         Ok(())
     }
@@ -517,6 +547,8 @@ pub struct CandyMachineData {
     pub price: u64,
     pub items_available: u64,
     pub go_live_date: Option<i64>,
+    pub whitelist_go_live_date: Option<i64>,
+    pub whitelisted_users: Vec<Pubkey>,
 }
 
 pub const CONFIG_ARRAY_START: usize = 32 + // authority
@@ -625,4 +657,8 @@ pub enum ErrorCode {
     CandyMachineNotLiveYet,
     #[msg("Number of config lines must be at least number of items available")]
     ConfigLineMismatch,
+    #[msg("Candy machine whitelist is not live yet!")]
+    CandyMachineWhitelistNotLiveYet,
+    #[msg("Payer is not whitelisted")]
+    PayerNotWhiteListed,
 }

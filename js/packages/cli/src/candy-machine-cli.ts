@@ -73,10 +73,6 @@ programCommand('upload')
   )
   .option('--no-retain-authority', 'Do not retain authority to update metadata')
   .option('--no-mutable', 'Metadata will not be editable')
-  .option(
-    '-r, --rpc-url <string>',
-    'custom rpc url since this is a heavy command',
-  )
   .action(async (files: string[], options, cmd) => {
     const {
       number,
@@ -89,7 +85,6 @@ programCommand('upload')
       awsS3Bucket,
       retainAuthority,
       mutable,
-      rpcUrl,
     } = cmd.opts();
 
     if (storage === 'ipfs' && (!ipfsInfuraProjectId || !ipfsInfuraSecret)) {
@@ -149,7 +144,6 @@ programCommand('upload')
         storage,
         retainAuthority,
         mutable,
-        rpcUrl,
         ipfsCredentials,
         awsS3Bucket,
       );
@@ -197,93 +191,76 @@ programCommand('verify_token_metadata')
     );
   });
 
-programCommand('verify')
-  .option(
-    '-r, --rpc-url <string>',
-    'custom rpc url since this is a heavy command',
-  )
-  .action(async (directory, cmd) => {
-    const { env, keypair, rpcUrl, cacheName } = cmd.opts();
+programCommand('verify').action(async (directory, cmd) => {
+  const { env, keypair, cacheName } = cmd.opts();
 
-    const cacheContent = loadCache(cacheName, env);
-    const walletKeyPair = loadWalletKey(keypair);
-    const anchorProgram = await loadCandyProgram(walletKeyPair, env, rpcUrl);
+  const cacheContent = loadCache(cacheName, env);
+  const walletKeyPair = loadWalletKey(keypair);
+  const anchorProgram = await loadCandyProgram(walletKeyPair, env);
 
-    const configAddress = new PublicKey(cacheContent.program.config);
-    const config = await anchorProgram.provider.connection.getAccountInfo(
-      configAddress,
-    );
-    let allGood = true;
+  const configAddress = new PublicKey(cacheContent.program.config);
+  const config = await anchorProgram.provider.connection.getAccountInfo(
+    configAddress,
+  );
+  let allGood = true;
 
-    const keys = Object.keys(cacheContent.items);
-    await Promise.all(
-      chunks(Array.from(Array(keys.length).keys()), 500).map(
-        async allIndexesInSlice => {
-          for (let i = 0; i < allIndexesInSlice.length; i++) {
-            const key = keys[allIndexesInSlice[i]];
-            log.debug('Looking at key ', allIndexesInSlice[i]);
+  const keys = Object.keys(cacheContent.items);
+  await Promise.all(
+    chunks(Array.from(Array(keys.length).keys()), 500).map(
+      async allIndexesInSlice => {
+        for (let i = 0; i < allIndexesInSlice.length; i++) {
+          const key = keys[allIndexesInSlice[i]];
+          log.debug('Looking at key ', allIndexesInSlice[i]);
 
-            const thisSlice = config.data.slice(
-              CONFIG_ARRAY_START + 4 + CONFIG_LINE_SIZE * allIndexesInSlice[i],
-              CONFIG_ARRAY_START +
-                4 +
-                CONFIG_LINE_SIZE * (allIndexesInSlice[i] + 1),
-            );
-            const name = fromUTF8Array([...thisSlice.slice(4, 36)]);
-            const uri = fromUTF8Array([...thisSlice.slice(40, 240)]);
-            const cacheItem = cacheContent.items[key];
-            if (!name.match(cacheItem.name) || !uri.match(cacheItem.link)) {
-              //leaving here for debugging reasons, but it's pretty useless. if the first upload fails - all others are wrong
-              // log.info(
-              //   `Name (${name}) or uri (${uri}) didnt match cache values of (${cacheItem.name})` +
-              //   `and (${cacheItem.link}). marking to rerun for image`,
-              //   key,
-              // );
-              cacheItem.onChain = false;
-              allGood = false;
-            } else {
-              const json = await fetch(cacheItem.link);
-              if (
-                json.status == 200 ||
-                json.status == 204 ||
-                json.status == 202
-              ) {
-                const body = await json.text();
-                const parsed = JSON.parse(body);
-                if (parsed.image) {
-                  const check = await fetch(parsed.image);
-                  if (
-                    check.status == 200 ||
-                    check.status == 204 ||
-                    check.status == 202
-                  ) {
-                    const text = await check.text();
-                    if (!text.match(/Not found/i)) {
-                      if (text.length == 0) {
-                        log.info(
-                          'Name',
-                          name,
-                          'with',
-                          uri,
-                          'has zero length, failing',
-                        );
-                        cacheItem.link = null;
-                        cacheItem.onChain = false;
-                        allGood = false;
-                      } else {
-                        log.info('Name', name, 'with', uri, 'checked out');
-                      }
-                    } else {
+          const thisSlice = config.data.slice(
+            CONFIG_ARRAY_START + 4 + CONFIG_LINE_SIZE * allIndexesInSlice[i],
+            CONFIG_ARRAY_START +
+              4 +
+              CONFIG_LINE_SIZE * (allIndexesInSlice[i] + 1),
+          );
+          const name = fromUTF8Array([...thisSlice.slice(4, 36)]);
+          const uri = fromUTF8Array([...thisSlice.slice(40, 240)]);
+          const cacheItem = cacheContent.items[key];
+          if (!name.match(cacheItem.name) || !uri.match(cacheItem.link)) {
+            //leaving here for debugging reasons, but it's pretty useless. if the first upload fails - all others are wrong
+            // log.info(
+            //   `Name (${name}) or uri (${uri}) didnt match cache values of (${cacheItem.name})` +
+            //   `and (${cacheItem.link}). marking to rerun for image`,
+            //   key,
+            // );
+            cacheItem.onChain = false;
+            allGood = false;
+          } else {
+            const json = await fetch(cacheItem.link);
+            if (
+              json.status == 200 ||
+              json.status == 204 ||
+              json.status == 202
+            ) {
+              const body = await json.text();
+              const parsed = JSON.parse(body);
+              if (parsed.image) {
+                const check = await fetch(parsed.image);
+                if (
+                  check.status == 200 ||
+                  check.status == 204 ||
+                  check.status == 202
+                ) {
+                  const text = await check.text();
+                  if (!text.match(/Not found/i)) {
+                    if (text.length == 0) {
                       log.info(
                         'Name',
                         name,
                         'with',
                         uri,
-                        'never got uploaded to arweave, failing',
+                        'has zero length, failing',
                       );
                       cacheItem.link = null;
                       cacheItem.onChain = false;
                       allGood = false;
+                    } else {
+                      log.info('Name', name, 'with', uri, 'checked out');
                     }
                   } else {
                     log.info(
@@ -291,8 +268,7 @@ programCommand('verify')
                       name,
                       'with',
                       uri,
-                      'returned non-200 from uploader',
-                      check.status,
+                      'never got uploaded to arweave, failing',
                     );
                     cacheItem.link = null;
                     cacheItem.onChain = false;
@@ -304,7 +280,8 @@ programCommand('verify')
                     name,
                     'with',
                     uri,
-                    'lacked image in json, failing',
+                    'returned non-200 from uploader',
+                    check.status,
                   );
                   cacheItem.link = null;
                   cacheItem.onChain = false;
@@ -316,63 +293,65 @@ programCommand('verify')
                   name,
                   'with',
                   uri,
-                  'returned no json from link',
+                  'lacked image in json, failing',
                 );
                 cacheItem.link = null;
                 cacheItem.onChain = false;
                 allGood = false;
               }
+            } else {
+              log.info('Name', name, 'with', uri, 'returned no json from link');
+              cacheItem.link = null;
+              cacheItem.onChain = false;
+              allGood = false;
             }
           }
-        },
-      ),
-    );
+        }
+      },
+    ),
+  );
 
-    if (!allGood) {
-      saveCache(cacheName, env, cacheContent);
-
-      throw new Error(
-        `not all NFTs checked out. check out logs above for details`,
-      );
-    }
-
-    const configData = (await anchorProgram.account.config.fetch(
-      configAddress,
-    )) as Config;
-
-    const lineCount = new anchor.BN(
-      config.data.slice(247, 247 + 4),
-      undefined,
-      'le',
-    );
-
-    log.info(
-      `uploaded (${lineCount.toNumber()}) out of (${
-        configData.data.maxNumberOfLines
-      })`,
-    );
-    if (configData.data.maxNumberOfLines > lineCount.toNumber()) {
-      throw new Error(
-        `predefined number of NFTs (${
-          configData.data.maxNumberOfLines
-        }) is smaller than the uploaded one (${lineCount.toNumber()})`,
-      );
-    } else {
-      log.info('ready to deploy!');
-    }
-
+  if (!allGood) {
     saveCache(cacheName, env, cacheContent);
-  });
+
+    throw new Error(
+      `not all NFTs checked out. check out logs above for details`,
+    );
+  }
+
+  const configData = (await anchorProgram.account.config.fetch(
+    configAddress,
+  )) as Config;
+
+  const lineCount = new anchor.BN(
+    config.data.slice(247, 247 + 4),
+    undefined,
+    'le',
+  );
+
+  log.info(
+    `uploaded (${lineCount.toNumber()}) out of (${
+      configData.data.maxNumberOfLines
+    })`,
+  );
+  if (configData.data.maxNumberOfLines > lineCount.toNumber()) {
+    throw new Error(
+      `predefined number of NFTs (${
+        configData.data.maxNumberOfLines
+      }) is smaller than the uploaded one (${lineCount.toNumber()})`,
+    );
+  } else {
+    log.info('ready to deploy!');
+  }
+
+  saveCache(cacheName, env, cacheContent);
+});
 
 programCommand('verify_price')
   .option('-p, --price <string>')
   .option('--cache-path <string>')
-  .option(
-    '-r, --rpc-url <string>',
-    'custom rpc url since this is a heavy command',
-  )
   .action(async (directory, cmd) => {
-    const { keypair, env, price, cacheName, rpcUrl, cachePath } = cmd.opts();
+    const { keypair, env, price, cacheName, cachePath } = cmd.opts();
     const lamports = parsePrice(price);
 
     if (isNaN(lamports)) {
@@ -390,7 +369,7 @@ programCommand('verify_price')
     }
 
     const walletKeyPair = loadWalletKey(keypair);
-    const anchorProgram = await loadCandyProgram(walletKeyPair, env, rpcUrl);
+    const anchorProgram = await loadCandyProgram(walletKeyPair, env);
 
     const candyAddress = new PublicKey(cacheContent.candyMachineAddress);
 
@@ -412,12 +391,8 @@ programCommand('verify_price')
 
 programCommand('show')
   .option('--cache-path <string>')
-  .option(
-    '-r, --rpc-url <string>',
-    'custom rpc url since this is a heavy command',
-  )
   .action(async (directory, cmd) => {
-    const { keypair, env, cacheName, rpcUrl, cachePath } = cmd.opts();
+    const { keypair, env, cacheName, cachePath } = cmd.opts();
 
     const cacheContent = loadCache(cacheName, env, cachePath);
 
@@ -428,7 +403,7 @@ programCommand('show')
     }
 
     const walletKeyPair = loadWalletKey(keypair);
-    const anchorProgram = await loadCandyProgram(walletKeyPair, env, rpcUrl);
+    const anchorProgram = await loadCandyProgram(walletKeyPair, env);
 
     const [candyMachine] = await getCandyMachineAddress(
       new PublicKey(cacheContent.program.config),
@@ -465,6 +440,14 @@ programCommand('show')
         machine.data.goLiveDate
           ? //@ts-ignore
             new Date(machine.data.goLiveDate * 1000)
+          : 'N/A',
+      );
+      log.info(
+        'whitelistGoLiveDate: ',
+        //@ts-ignore
+        machine.data.whitelistGoLiveDate
+          ? //@ts-ignore
+            new Date(machine.data.whitelistGoLiveDate * 1000)
           : 'N/A',
       );
     } catch (e) {
@@ -515,10 +498,6 @@ programCommand('create_candy_machine')
     '-s, --sol-treasury-account <string>',
     'SOL account that receives mint payments.',
   )
-  .option(
-    '-r, --rpc-url <string>',
-    'custom rpc url since this is a heavy command',
-  )
   .action(async (directory, cmd) => {
     const {
       keypair,
@@ -528,14 +507,13 @@ programCommand('create_candy_machine')
       splToken,
       splTokenAccount,
       solTreasuryAccount,
-      rpcUrl,
     } = cmd.opts();
 
     let parsedPrice = parsePrice(price);
     const cacheContent = loadCache(cacheName, env);
 
     const walletKeyPair = loadWalletKey(keypair);
-    const anchorProgram = await loadCandyProgram(walletKeyPair, env, rpcUrl);
+    const anchorProgram = await loadCandyProgram(walletKeyPair, env);
 
     let wallet = walletKeyPair.publicKey;
     const remainingAccounts = [];
@@ -604,6 +582,8 @@ programCommand('create_candy_machine')
         price: new anchor.BN(parsedPrice),
         itemsAvailable: new anchor.BN(Object.keys(cacheContent.items).length),
         goLiveDate: null,
+        whitelistGoLiveDate: null,
+
       },
       {
         accounts: {
@@ -633,23 +613,25 @@ programCommand('update_candy_machine')
   )
   .option('-p, --price <string>', 'SOL price')
   .option(
-    '-r, --rpc-url <string>',
-    'custom rpc url since this is a heavy command',
+    '-wld, --whitelistdate <string>',
+    'timestamp - eg "04 Dec 1995 00:12:00 GMT" or "now"',
   )
   .action(async (directory, cmd) => {
-    const { keypair, env, date, rpcUrl, price, cacheName } = cmd.opts();
+    const { keypair, env, date, price, cacheName, whitelistdate } = cmd.opts();
     const cacheContent = loadCache(cacheName, env);
 
     const secondsSinceEpoch = date ? parseDate(date) : null;
+    const whitelistSecondsSinceEpoch = whitelistdate ? parseDate(whitelistdate) : null;
     const lamports = price ? parsePrice(price) : null;
 
     const walletKeyPair = loadWalletKey(keypair);
-    const anchorProgram = await loadCandyProgram(walletKeyPair, env, rpcUrl);
+    const anchorProgram = await loadCandyProgram(walletKeyPair, env);
 
     const candyMachine = new PublicKey(cacheContent.candyMachineAddress);
     const tx = await anchorProgram.rpc.updateCandyMachine(
       lamports ? new anchor.BN(lamports) : null,
       secondsSinceEpoch ? new anchor.BN(secondsSinceEpoch) : null,
+      whitelistSecondsSinceEpoch ? new anchor.BN(whitelistSecondsSinceEpoch) : null,
       {
         accounts: {
           candyMachine,
@@ -664,51 +646,42 @@ programCommand('update_candy_machine')
       log.info(
         ` - updated startDate timestamp: ${secondsSinceEpoch} (${date})`,
       );
+      if (whitelistdate)
+      log.info(
+        ` - updated whitelistDate timestamp: ${whitelistSecondsSinceEpoch} (${whitelistdate})`,
+      );
     if (lamports)
       log.info(` - updated price: ${lamports} lamports (${price} SOL)`);
     log.info('update_candy_machine finished', tx);
   });
 
-programCommand('mint_one_token')
-  .option(
-    '-r, --rpc-url <string>',
-    'custom rpc url since this is a heavy command',
-  )
-  .action(async (directory, cmd) => {
-    const { keypair, env, cacheName, rpcUrl } = cmd.opts();
+programCommand('mint_one_token').action(async (directory, cmd) => {
+  const { keypair, env, cacheName } = cmd.opts();
 
-    const cacheContent = loadCache(cacheName, env);
-    const configAddress = new PublicKey(cacheContent.program.config);
-    const tx = await mint(keypair, env, configAddress, rpcUrl);
+  const cacheContent = loadCache(cacheName, env);
+  const configAddress = new PublicKey(cacheContent.program.config);
+  const tx = await mint(keypair, env, configAddress);
 
-    log.info('mint_one_token finished', tx);
-  });
+  log.info('mint_one_token finished', tx);
+});
 
 programCommand('sign')
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   .option('-m, --metadata <string>', 'base58 metadata account id')
-  .option(
-    '-r, --rpc-url <string>',
-    'custom rpc url since this is a heavy command',
-  )
   .action(async (directory, cmd) => {
-    const { keypair, env, rpcUrl, metadata } = cmd.opts();
+    const { keypair, env, metadata } = cmd.opts();
 
-    await signMetadata(metadata, keypair, env, rpcUrl);
+    await signMetadata(metadata, keypair, env);
   });
 
 programCommand('sign_all')
   .option('-b, --batch-size <string>', 'Batch size', '10')
   .option('-d, --daemon', 'Run signing continuously', false)
-  .option(
-    '-r, --rpc-url <string>',
-    'custom rpc url since this is a heavy command',
-  )
   .action(async (directory, cmd) => {
-    const { keypair, env, cacheName, rpcUrl, batchSize, daemon } = cmd.opts();
+    const { keypair, env, cacheName, batchSize, daemon } = cmd.opts();
     const cacheContent = loadCache(cacheName, env);
     const walletKeyPair = loadWalletKey(keypair);
-    const anchorProgram = await loadCandyProgram(walletKeyPair, env, rpcUrl);
+    const anchorProgram = await loadCandyProgram(walletKeyPair, env);
     const candyAddress = cacheContent.candyMachineAddress;
 
     const batchSizeParsed = parseInt(batchSize);
